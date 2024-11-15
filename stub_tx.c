@@ -42,15 +42,15 @@ void stub_complete(struct urb *urb)
 	struct stub_priv *priv = (struct stub_priv *) urb->context;
 	struct stub_device *sdev = priv->sdev;
 	unsigned long flags;
-
+	int ret;
 	usbip_dbg_stub_tx("complete! status %d\n", urb->status);
 
 	switch (urb->status) {
 	case 0:
 		/* OK */
 		//add compression here to the complete urb
-		//if (usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS) 
-		
+		urb_cprs(urb);
+
 		break;
 	case -ENOENT:
 		dev_info(&urb->dev->dev,
