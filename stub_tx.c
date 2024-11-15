@@ -48,6 +48,9 @@ void stub_complete(struct urb *urb)
 	switch (urb->status) {
 	case 0:
 		/* OK */
+		//add compression here to the complete urb
+		//if (usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS) 
+		
 		break;
 	case -ENOENT:
 		dev_info(&urb->dev->dev,
