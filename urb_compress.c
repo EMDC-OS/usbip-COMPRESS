@@ -9,7 +9,7 @@
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/scatterlist.h>
-#include <linux/export.h> 
+
 #include "usbip_common.h"
 
 
@@ -28,7 +28,6 @@ void urb_cprs(struct urb *urb){
     }
 
 }
-EXPORT_SYMBOL(urb_cprs);
 
 
 int urb_cprs_iso(struct urb *urb){
@@ -138,35 +137,9 @@ void urb_dcprs(struct urb *urb){
         }
     }
 }
-EXPORT_SYMBOL(urb_dcprs);
-
 
 
 //decompression after adding the padding back to the iso packets
-int urb_dcprs_iso(struct urb *urb){
-    struct crypto_comp *tfm;
-    int i, ret = 0;
-
-    tfm = crypto_alloc_comp("lzo-rle", 0, 0);
-    if (IS_ERR(tfm)) {
-        pr_err("Failed to allocate LZO-RLE transform\n");
-        return PTR_ERR(tfm);
-    }
-
-    for (i = 0; i < urb->number_of_packets; i++) {
-        struct usb_iso_packet_descriptor *desc = &urb->iso_frame_desc[i];
-        unsigned int offset = desc->offset;
-        unsigned int length = desc->actual_length;
-        unsigned int decompressed_len = PAGE_SIZE; // Decompressed size (estimate)
-        void *src, *dest;
-
-        if (length == 0)
-            continue;
-
-        src = urb->transfer_buffer + offset;
-        dest = kmalloc(PAGE_SIZE, GFP_KERNEL);
-        if (!dest) {
-            ret = -ENOMEM;//decompression after adding the padding back to the iso packets
 int urb_dcprs_iso(struct urb *urb){
     struct crypto_comp *tfm;
     int i, ret = 0;
@@ -202,32 +175,6 @@ int urb_dcprs_iso(struct urb *urb){
         }
 
         if (decompressed_len < length || decompressed_len > desc->length) {
-            pr_err("Compressed data exceeds original size, skipping packet %d\n", i);
-            kfree(dest);
-            continue;
-        }
-
-        memcpy(src, dest, decompressed_len);
-        desc->actual_length = decompressed_len;
-
-        kfree(dest);
-    }
-
-    crypto_free_comp(tfm);
-    return ret;
-
-}
-            break;
-        }
-
-        ret = crypto_comp_decompress(tfm, src, length, dest, &decompressed_len);
-        if (ret < 0) {
-            pr_err("Decompression failed for packet %d\n", i);
-            kfree(dest);
-            continue;
-        }
-
-        if (decompressed_len < length || decompressed_len > offset) {
             pr_err("Compressed data exceeds original size, skipping packet %d\n", i);
             kfree(dest);
             continue;
