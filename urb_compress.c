@@ -9,7 +9,7 @@
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/scatterlist.h>
-
+#include <linux/export.h> 
 #include "usbip_common.h"
 
 
@@ -28,6 +28,7 @@ void urb_cprs(struct urb *urb){
     }
 
 }
+EXPORT_SYMBOL(urb_cprs);
 
 
 int urb_cprs_iso(struct urb *urb){
@@ -137,6 +138,8 @@ void urb_dcprs(struct urb *urb){
         }
     }
 }
+EXPORT_SYMBOL(urb_dcprs);
+
 
 
 //decompression after adding the padding back to the iso packets
