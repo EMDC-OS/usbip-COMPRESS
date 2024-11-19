@@ -178,7 +178,7 @@ int urb_dcprs_iso(struct urb *urb){
         struct usb_iso_packet_descriptor *desc = &urb->iso_frame_desc[i];
         unsigned int offset = desc->offset;
         unsigned int length = desc->actual_length;
-        unsigned int decompressed_len = PAGE_SIZE; // Decompressed size (estimate)
+        unsigned int decompressed_len = desc->length; // Decompressed size (estimate)
         void *src, *dest;
 
         if (length == 0)
@@ -198,7 +198,7 @@ int urb_dcprs_iso(struct urb *urb){
             continue;
         }
 
-        if (decompressed_len < length || decompressed_len > offset) {
+        if (decompressed_len < length || decompressed_len > desc->length) {
             pr_err("Compressed data exceeds original size, skipping packet %d\n", i);
             kfree(dest);
             continue;
