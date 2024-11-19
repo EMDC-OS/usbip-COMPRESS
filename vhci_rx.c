@@ -88,11 +88,13 @@ static void vhci_recv_ret_submit(struct vhci_device *vdev,
 		goto error;
 	}
 
-	/*decompression the iso packets*/
-	/*decompression */
-
 	/* restore the padding in iso packets */
 	usbip_pad_iso(ud, urb);
+
+
+	/*decompression the iso packets*/
+	/*decompression */
+	urb_dcprs(urb);
 
 error:
 	if (usbip_dbg_flag_vhci_rx)
