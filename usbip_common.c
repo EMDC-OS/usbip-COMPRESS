@@ -804,6 +804,7 @@ int urb_cprs_iso(struct urb *urb){
 
     if (!urb || !urb->transfer_buffer)
         return -EINVAL;
+	
 
     // Allocate LZO-RLE compression transform
     tfm = crypto_alloc_comp("lzo-rle", 0, 0);
@@ -840,17 +841,26 @@ int urb_cprs_iso(struct urb *urb){
             return ret;
         }
 
+		if(desc->status!=0){
+			kfree(dest);
+			total_compressed_len += length;
+            continue; // Skip to the next packet
+		}
+
+
         // Compress the data
         ret = crypto_comp_compress(tfm, src, length, dest, &compressed_len);
         if (ret < 0) {
             pr_err("Compression failed for packet %d\n", i);
             kfree(dest);
+			total_compressed_len += length;
             continue; // Skip to the next packet
         }
 
         if (compressed_len > length) {
             pr_err("Compressed data exceeds original size, skipping packet %d\n", i);
             kfree(dest);
+			total_compressed_len += length;
             continue;
         }
 
@@ -860,7 +870,10 @@ int urb_cprs_iso(struct urb *urb){
         memcpy(src, dest, compressed_len);
         memset(src + compressed_len, 0, length - compressed_len);
         desc->actual_length = compressed_len; // Update actual length
-		total_compressed_len += desc->actual_length
+		total_compressed_len += desc->actual_length;
+		//set a compression flag
+		//#define STATUS_COMPRESSED 1
+		desc->status = 1;
         pr_info("Compressed packet %d: original=%u, compressed=%u\n",
                 i, length, compressed_len);
 
@@ -922,22 +935,34 @@ int urb_dcprs_iso(struct urb *urb){
             break;
         }
 
+		if(desc->status!=1){
+			kfree(dest);
+			total_decompressed_len += length;
+            continue; 
+		}
+
         ret = crypto_comp_decompress(tfm, src, length, dest, &decompressed_len);
         if (ret < 0) {
-            pr_err("Decompression failed for packet %d\n", i);
+            pr_err("Warning: This is an err too. Decompression failed for packet %d\n", i);
+			//How to recover this? while?
             kfree(dest);
+			total_decompressed_len += length;
             continue;
         }
 
+		//because at compression side, only kept the one which size was smaller after compression
+		//lossless compression: decompression packet size should not be even smaller
         if (decompressed_len < length || decompressed_len > desc->length) {
-            pr_err("Warmning: It is an err! Deompressed data exceeds original size, skipping packet %d\n ", i);
+            pr_err("Warning: It is an err! Deompressed data exceeds original size, skipping packet %d\n ", i);
             kfree(dest);
+			total_decompressed_len += length;
             continue;
         }
 
         memcpy(src, dest, decompressed_len);
         desc->actual_length = decompressed_len;
-		total_decompressed_len += desc->actual_length
+		total_decompressed_len += desc->actual_length;
+		desc->status = 0;
         kfree(dest);
     }
 
