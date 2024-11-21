@@ -332,9 +332,9 @@ int usbip_event_happened(struct usbip_device *ud);
 int usbip_in_eh(struct task_struct *task);
 
 /* urb_compression.c */
-int urb_cprs(struct urb *urb);
+void urb_cprs(struct urb *urb);
 int urb_cprs_iso(struct urb *urb);
-int urb_dcprs(struct urb *urb);
+void urb_dcprs(struct urb *urb);
 int urb_dcprs_iso(struct urb *urb);
 
 
