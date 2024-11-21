@@ -800,6 +800,7 @@ int urb_cprs_iso(struct urb *urb){
     struct crypto_comp *tfm;
     void *workspace = NULL;
     int i, ret = 0;
+	unsigned int total_compressed_len = 0;
 
     if (!urb || !urb->transfer_buffer)
         return -EINVAL;
@@ -825,6 +826,7 @@ int urb_cprs_iso(struct urb *urb){
         unsigned int length = desc->actual_length; // Original length
         unsigned int compressed_len = 0;
         void *src, *dest;
+
 
         if (length == 0)
             continue;
@@ -858,7 +860,7 @@ int urb_cprs_iso(struct urb *urb){
         memcpy(src, dest, compressed_len);
         memset(src + compressed_len, 0, length - compressed_len);
         desc->actual_length = compressed_len; // Update actual length
-
+		total_compressed_len += desc->actual_length
         pr_info("Compressed packet %d: original=%u, compressed=%u\n",
                 i, length, compressed_len);
 
@@ -872,6 +874,7 @@ out_free_tfm:
     crypto_free_comp(tfm);
     return ret;*/
     crypto_free_comp(tfm);
+	urb->actual_length = total_compressed_len;
     return ret;
 }
 
@@ -883,9 +886,9 @@ void urb_dcprs(struct urb *urb){
     if (usb_pipeisoc(urb->pipe)){
         ret = urb_dcprs_iso(urb);
         if (ret < 0) {
-            pr_err("URB compression failed with error: %d\n", ret);
+            pr_err("URB decompression failed with error: %d\n", ret);
         } else {
-            pr_info("URB compression succeeded.\n");
+            pr_info("URB decompression succeeded.\n");
         }
     }
 }
@@ -895,7 +898,7 @@ EXPORT_SYMBOL_GPL(urb_dcprs);
 int urb_dcprs_iso(struct urb *urb){
     struct crypto_comp *tfm;
     int i, ret = 0;
-
+	unsigned int total_decompressed_len = 0;
     tfm = crypto_alloc_comp("lzo-rle", 0, 0);
     if (IS_ERR(tfm)) {
         pr_err("Failed to allocate LZO-RLE transform\n");
@@ -927,18 +930,19 @@ int urb_dcprs_iso(struct urb *urb){
         }
 
         if (decompressed_len < length || decompressed_len > desc->length) {
-            pr_err("Compressed data exceeds original size, skipping packet %d\n", i);
+            pr_err("Warmning: It is an err! Deompressed data exceeds original size, skipping packet %d\n ", i);
             kfree(dest);
             continue;
         }
 
         memcpy(src, dest, decompressed_len);
         desc->actual_length = decompressed_len;
-
+		total_decompressed_len += desc->actual_length
         kfree(dest);
     }
 
     crypto_free_comp(tfm);
+	urb->actual_length = total_decompressed_len;
     return ret;
 
 }
