@@ -14,11 +14,12 @@
 #include <linux/module.h>
 #include <linux/moduleparam.h>
 #include <net/sock.h>
-#include <linux/crypto.h>
+//#include <linux/crypto.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/scatterlist.h>
-
+#include <linux/lz4.h>
+#include <linux/zstd.h>
 #include "usbip_common.h"
 
 #define DRIVER_AUTHOR "Takahiro Hirofuchi <hirofuchi@users.sourceforge.net>"
@@ -797,28 +798,37 @@ int urb_cprs_iso(struct urb *urb){
    //add compression flag on the status
    //using linux kernel crypto model
     
-    struct crypto_comp *tfm;
-    void *workspace = NULL;
+
     int i, ret = 0;
 	unsigned int total_compressed_len = 0;
+    unsigned int max_length = 0;
+	void *dest;
+	void *workspace = NULL;
 
     if (!urb || !urb->transfer_buffer)
         return -EINVAL;
 	
-
     // Allocate LZO-RLE compression transform
+	/*struct crypto_comp *tfm;
     tfm = crypto_alloc_comp("lzo-rle", 0, 0);
     if (IS_ERR(tfm)) {
         pr_err("Failed to allocate LZO-RLE transform\n");
         return PTR_ERR(tfm);
-    }
+    }*/
 
-    /* Allocate workspace for compression
-    workspace = kmalloc(PAGE_SIZE, GFP_KERNEL);
+    /* Allocate workspace for compression */
+    workspace = kmalloc(LZ4_MEM_COMPRESS, GFP_KERNEL);
     if (!workspace) {
         ret = -ENOMEM;
-        goto out_free_tfm;
-    }*/
+        return ret;
+    }
+
+   max_length = urb->iso_frame_desc[0].length;
+   dest = kmalloc(max_length, GFP_KERNEL);  // Allocate temporary buffer
+	if (!dest) {
+		ret = -ENOMEM;
+		return ret;
+	}
 
     // Process each ISO packet
     for (i = 0; i < urb->number_of_packets; i++) {
@@ -826,40 +836,42 @@ int urb_cprs_iso(struct urb *urb){
         unsigned int offset = desc->offset;
         unsigned int length = desc->actual_length; // Original length
         unsigned int compressed_len = 0;
-        void *src, *dest;
-
+		//unsigned int com_space_size = 0;
+        void *src;
 
         if (length == 0)
             continue;
-        //acutual_length < offset
-        //offset is determined by the HW
-        //before transmit, it will have padding
-        src = urb->transfer_buffer + offset; 
-        dest = kmalloc(length, GFP_KERNEL);  // Allocate temporary buffer
-        if (!dest) {
-            ret = -ENOMEM;
-            return ret;
-        }
 
 		if(desc->status!=0){
-			kfree(dest);
+			//kfree(dest);
 			total_compressed_len += length;
             continue; // Skip to the next packet
 		}
 
+		        //acutual_length < offset
+        //offset is determined by the HW
+        //before transmit, it will have padding
+		memset(dest, 0, max_length);
+
+        src = urb->transfer_buffer + offset;
 
         // Compress the data
-        ret = crypto_comp_compress(tfm, src, length, dest, &compressed_len);
-        if (ret < 0) {
+        //ret = crypto_comp_compress(tfm, src, length, dest, &compressed_len);
+		//compressed_len = LZ4_compress_fast(src, dest, length, max_length, 1);
+
+		compressed_len = LZ4_compress_default((const char*)src, (char*)dest, length, max_length,workspace);
+        if (compressed_len <= 0) {
             pr_err("Compression failed for packet %d\n", i);
-            kfree(dest);
+            //kfree(dest);
 			total_compressed_len += length;
             continue; // Skip to the next packet
         }
 
         if (compressed_len > length) {
-            pr_err("Compressed data exceeds original size, skipping packet %d\n", i);
-            kfree(dest);
+			//only want to keep data compressed smaller
+            pr_err("Compressed data exceeds original size, skipping packet %d:original=%u, compressed=%u\n",
+                i, length, compressed_len);
+            //kfree(dest);
 			total_compressed_len += length;
             continue;
         }
@@ -868,7 +880,7 @@ int urb_cprs_iso(struct urb *urb){
         //because of padding it will not overbound?
 
         memcpy(src, dest, compressed_len);
-        memset(src + compressed_len, 0, length - compressed_len);
+        memset(src + compressed_len, 0, length - compressed_len); //padding
         desc->actual_length = compressed_len; // Update actual length
 		total_compressed_len += desc->actual_length;
 		//set a compression flag
@@ -877,8 +889,7 @@ int urb_cprs_iso(struct urb *urb){
         pr_info("Compressed packet %d: original=%u, compressed=%u\n",
                 i, length, compressed_len);
 
-        kfree(dest);
-
+        //kfree(dest);
     }
 
 /*out_free_workspace:
@@ -886,7 +897,10 @@ int urb_cprs_iso(struct urb *urb){
 out_free_tfm:
     crypto_free_comp(tfm);
     return ret;*/
-    crypto_free_comp(tfm);
+    //crypto_free_comp(tfm);
+	
+	kfree(dest);
+	kfree(workspace);
 	urb->actual_length = total_compressed_len;
     return ret;
 }
@@ -909,52 +923,60 @@ EXPORT_SYMBOL_GPL(urb_dcprs);
 
 //decompression after adding the padding back to the iso packets
 int urb_dcprs_iso(struct urb *urb){
-    struct crypto_comp *tfm;
+
     int i, ret = 0;
 	unsigned int total_decompressed_len = 0;
-    tfm = crypto_alloc_comp("lzo-rle", 0, 0);
+    /*struct crypto_comp *tfm;
+	tfm = crypto_alloc_comp("lzo-rle", 0, 0);
     if (IS_ERR(tfm)) {
         pr_err("Failed to allocate LZO-RLE transform\n");
         return PTR_ERR(tfm);
-    }
+    }*/
 
+   unsigned int max_length = urb->iso_frame_desc[0].length;
+   void *dest = kmalloc(max_length, GFP_KERNEL);  // Allocate temporary buffer
+	if (!dest) {
+		ret = -ENOMEM;
+		return ret;
+	}
+   
+    
     for (i = 0; i < urb->number_of_packets; i++) {
         struct usb_iso_packet_descriptor *desc = &urb->iso_frame_desc[i];
         unsigned int offset = desc->offset;
         unsigned int length = desc->actual_length;
         unsigned int decompressed_len = desc->length; // Decompressed size (estimate)
-        void *src, *dest;
+        void *src;
 
         if (length == 0)
             continue;
 
-        src = urb->transfer_buffer + offset;
-        dest = kmalloc(PAGE_SIZE, GFP_KERNEL);
-        if (!dest) {
-            ret = -ENOMEM;
-            break;
-        }
-
+		
 		if(desc->status!=1){
-			kfree(dest);
+			//kfree(dest);
 			total_decompressed_len += length;
             continue; 
 		}
+		memset(dest, 0, max_length);
 
-        ret = crypto_comp_decompress(tfm, src, length, dest, &decompressed_len);
-        if (ret < 0) {
+        src = urb->transfer_buffer + offset;
+
+		decompressed_len  = LZ4_decompress_safe((const char*)src, (char*)dest, length, max_length);
+
+        //ret = crypto_comp_decompress(tfm, src, length, dest, &decompressed_len);
+        if (decompressed_len <= 0) {
             pr_err("Warning: This is an err too. Decompression failed for packet %d\n", i);
 			//How to recover this? while?
-            kfree(dest);
+            //kfree(dest);
 			total_decompressed_len += length;
             continue;
         }
 
 		//because at compression side, only kept the one which size was smaller after compression
 		//lossless compression: decompression packet size should not be even smaller
-        if (decompressed_len < length || decompressed_len > desc->length) {
+        if (decompressed_len < length || decompressed_len > max_length) {
             pr_err("Warning: It is an err! Deompressed data exceeds original size, skipping packet %d\n ", i);
-            kfree(dest);
+            //kfree(dest);
 			total_decompressed_len += length;
             continue;
         }
@@ -963,10 +985,11 @@ int urb_dcprs_iso(struct urb *urb){
         desc->actual_length = decompressed_len;
 		total_decompressed_len += desc->actual_length;
 		desc->status = 0;
-        kfree(dest);
+        //kfree(dest);
     }
 
-    crypto_free_comp(tfm);
+	kfree(dest);
+    //crypto_free_comp(tfm);
 	urb->actual_length = total_decompressed_len;
     return ret;
 
