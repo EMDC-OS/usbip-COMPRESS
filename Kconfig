@@ -5,6 +5,8 @@ config USBIP_CORE
 	depends on NET
 	select USB_COMMON
 	select SGL_ALLOC
+	select LZ4_COMPRESS
+	select LZ4_DECOMPRESS
 	help
 	  This enables pushing USB packets over IP to allow remote
 	  machines direct access to USB devices. It provides the
